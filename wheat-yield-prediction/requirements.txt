@@ -1,0 +1,14 @@
+# Python environment for the wheat-yield prediction pipeline
+# Original runs were performed on Google Colab (Python 3.10+).
+# scikit-learn is pinned because the saved *_trend_models.pkl were
+# serialised with 1.6.1; loading under a different version raises a
+# version-mismatch warning.
+
+numpy>=1.24
+pandas>=2.0
+matplotlib>=3.7
+scikit-learn==1.6.1
+xgboost>=2.0
+tensorflow>=2.15        # provides Keras 3 (.keras model format)
+shap>=0.44
+statsmodels>=0.14

@@ -1,0 +1,395 @@
+// =====================================================================
+// SECTION 1 — TMAX MEAN + HEAT STRESS DAYS
+// Source: NASA GDDP-CMIP6
+// Scenario: SSP2-4.5
+// Models: 5-model median (ACCESS-CM2, MPI-ESM1-2-HR, MIROC6, 
+//         INM-CM5-0, NorESM2-MM)
+// Window: March 1 – April 30 (grain filling — same as training)
+// Threshold: Tmax > 34°C = 307.15 K (same as ERA5-Land training)
+// Expected Tmax range: 28–42°C
+// Expected HeatStress_days range: 14–49 days
+// Output: 20 rows (4 districts × 5 years)
+// =====================================================================
+
+var districts = ee.FeatureCollection(
+  'projects/ee-ahsanahsan520/assets/multan_districts'
+).filter(ee.Filter.inList('NAME_3', [
+  'Multan', 'Lodhran', 'Khanewal', 'Vehari'
+]));
+
+var MODELS   = ['ACCESS-CM2', 'MPI-ESM1-2-HR', 'MIROC6', 
+                'INM-CM5-0', 'NorESM2-MM'];
+var SCENARIO = 'ssp245';
+var YEARS    = ee.List.sequence(2026, 2030);
+
+var tmaxTable = ee.FeatureCollection(
+  YEARS.map(function(year) {
+    year = ee.Number(year);
+
+    var start = ee.Date.fromYMD(year, 3, 1);
+    var end   = ee.Date.fromYMD(year, 4, 30);
+
+    // One seasonal image per model
+    var modelImages = ee.ImageCollection(
+      ee.List(MODELS).map(function(model) {
+        var col = ee.ImageCollection('NASA/GDDP-CMIP6')
+          .filter(ee.Filter.eq('model',    model))
+          .filter(ee.Filter.eq('scenario', SCENARIO))
+          .filterDate(start, end.advance(1, 'day'))
+          .select('tasmax');
+
+        // Mean Tmax → Celsius
+        var tmaxMean = col.mean()
+          .subtract(273.15)
+          .rename('Tmax_mean_C');
+
+        // Heat stress days: Tmax > 307.15 K (= 34°C)
+        var hsDays = col
+          .map(function(img) {
+            return img.gt(307.15).rename('HeatStress_days');
+          })
+          .sum()
+          .rename('HeatStress_days');
+
+        return tmaxMean.addBands(hsDays);
+      })
+    );
+
+    // Pixel-wise median across 5 models
+    var medianImg = modelImages.median();
+
+    var stats = medianImg.reduceRegions({
+      collection: districts,
+      reducer:    ee.Reducer.mean(),
+      scale:      9000
+    });
+
+    return stats.map(function(f) {
+      return f.set({
+        'Year':            year,
+        'District':        f.get('NAME_3'),
+        'Tmax_mean_C':     f.get('Tmax_mean_C'),
+        'HeatStress_days': f.get('HeatStress_days')
+      });
+    });
+  })
+).flatten();
+
+var finalTMAX = tmaxTable.select([
+  'Year', 'District', 'Tmax_mean_C', 'HeatStress_days'
+]);
+
+// --- Checks ---
+print('Total rows (expect 20):', finalTMAX.size());
+print('Sample (first 20):', finalTMAX.limit(20));
+print('Tmax stats (expect 28–42°C):', 
+      finalTMAX.aggregate_stats('Tmax_mean_C'));
+print('HeatStress_days stats (expect 14–49 days):', 
+      finalTMAX.aggregate_stats('HeatStress_days'));
+
+Export.table.toDrive({
+  collection:  finalTMAX,
+  description: 'CMIP6_Tmax_HeatStress_MarApr_2026_2030',
+  fileFormat:  'CSV'
+});
+// =====================================================================
+// SECTION 2 — TMIN MEAN + COLD STRESS DAYS
+// Source: NASA GDDP-CMIP6
+// Scenario: SSP2-4.5
+// Models: 5-model median (ACCESS-CM2, MPI-ESM1-2-HR, MIROC6,
+//         INM-CM5-0, NorESM2-MM)
+// Window: November 1 (prev year) – February 28 (current year)
+// Same window as ERA5-Land training extraction
+// Threshold: Tmin < 5°C = 278.15 K (same as training)
+// Expected Tmin_mean_C range: 2–15°C
+// Expected ColdStress_days range: 0–23 days
+// Output: 20 rows (4 districts × 5 years)
+// =====================================================================
+
+var districts = ee.FeatureCollection(
+  'projects/ee-ahsanahsan520/assets/multan_districts'
+).filter(ee.Filter.inList('NAME_3', [
+  'Multan', 'Lodhran', 'Khanewal', 'Vehari'
+]));
+
+var MODELS   = ['ACCESS-CM2', 'MPI-ESM1-2-HR', 'MIROC6',
+                'INM-CM5-0', 'NorESM2-MM'];
+var SCENARIO = 'ssp245';
+var YEARS    = ee.List.sequence(2026, 2030);
+
+var tminTable = ee.FeatureCollection(
+  YEARS.map(function(year) {
+    year = ee.Number(year);
+
+    // November of PREVIOUS year to February of current year
+    var start = ee.Date.fromYMD(year.subtract(1), 11, 1);
+    var end   = ee.Date.fromYMD(year, 2, 28);
+
+    var modelImages = ee.ImageCollection(
+      ee.List(MODELS).map(function(model) {
+        var col = ee.ImageCollection('NASA/GDDP-CMIP6')
+          .filter(ee.Filter.eq('model',    model))
+          .filter(ee.Filter.eq('scenario', SCENARIO))
+          .filterDate(start, end.advance(1, 'day'))
+          .select('tasmin');
+
+        // Mean Tmin → Celsius
+        var tminMean = col.mean()
+          .subtract(273.15)
+          .rename('Tmin_mean_C');
+
+        // Cold stress days: Tmin < 278.15 K (= 5°C)
+        var csDays = col
+          .map(function(img) {
+            return img.lt(278.15).rename('ColdStress_days');
+          })
+          .sum()
+          .rename('ColdStress_days');
+
+        return tminMean.addBands(csDays);
+      })
+    );
+
+    // Pixel-wise median across 5 models
+    var medianImg = modelImages.median();
+
+    var stats = medianImg.reduceRegions({
+      collection: districts,
+      reducer:    ee.Reducer.mean(),
+      scale:      9000
+    });
+
+    return stats.map(function(f) {
+      return f.set({
+        'Year':            year,
+        'District':        f.get('NAME_3'),
+        'Tmin_mean_C':     f.get('Tmin_mean_C'),
+        'ColdStress_days': f.get('ColdStress_days')
+      });
+    });
+  })
+).flatten();
+
+var finalTMIN = tminTable.select([
+  'Year', 'District', 'Tmin_mean_C', 'ColdStress_days'
+]);
+
+// --- Checks ---
+print('Total rows (expect 20):', finalTMIN.size());
+print('Sample (first 20):', finalTMIN.limit(20));
+print('Tmin stats (expect 2–15°C):',
+      finalTMIN.aggregate_stats('Tmin_mean_C'));
+print('ColdStress_days stats (expect 0–23 days):',
+      finalTMIN.aggregate_stats('ColdStress_days'));
+
+Export.table.toDrive({
+  collection:  finalTMIN,
+  description: 'CMIP6_Tmin_ColdStress_NovFeb_2026_2030',
+  fileFormat:  'CSV'
+});
+// =====================================================================
+// SECTION 3 — RAINFALL TOTAL (Raw mm)
+// Source: NASA GDDP-CMIP6
+// Scenario: SSP2-4.5
+// Models: 5-model median (ACCESS-CM2, MPI-ESM1-2-HR, MIROC6,
+//         INM-CM5-0, NorESM2-MM)
+// Window: November 1 (prev year) – April 30 (current year)
+// Same window as ERA5-Land training extraction
+// CMIP6 band: pr (kg/m²/s) → converted to mm/day × sum = mm/season
+// Output raw mm only — log transform applied in Python
+// Training Rain_log range: 2.75–5.38
+//   → back-calculated raw mm: ~16–217 mm
+// Expected range: 30–250 mm
+// Output: 20 rows (4 districts × 5 years)
+// =====================================================================
+
+var districts = ee.FeatureCollection(
+  'projects/ee-ahsanahsan520/assets/multan_districts'
+).filter(ee.Filter.inList('NAME_3', [
+  'Multan', 'Lodhran', 'Khanewal', 'Vehari'
+]));
+
+var MODELS   = ['ACCESS-CM2', 'MPI-ESM1-2-HR', 'MIROC6',
+                'INM-CM5-0', 'NorESM2-MM'];
+var SCENARIO = 'ssp245';
+var YEARS    = ee.List.sequence(2026, 2030);
+
+var rainTable = ee.FeatureCollection(
+  YEARS.map(function(year) {
+    year = ee.Number(year);
+
+    // November of PREVIOUS year to April of current year
+    // Exactly matches ERA5-Land training window
+    var start = ee.Date.fromYMD(year.subtract(1), 11, 1);
+    var end   = ee.Date.fromYMD(year, 4, 30);
+
+    var modelImages = ee.ImageCollection(
+      ee.List(MODELS).map(function(model) {
+        var col = ee.ImageCollection('NASA/GDDP-CMIP6')
+          .filter(ee.Filter.eq('model',    model))
+          .filter(ee.Filter.eq('scenario', SCENARIO))
+          .filterDate(start, end.advance(1, 'day'))
+          .select('pr');  // precipitation flux kg/m²/s
+
+        // Convert kg/m²/s → mm/day (× 86400 seconds)
+        // Then sum all days → seasonal total mm
+        var rainTotal = col
+          .map(function(img) {
+            return img.multiply(86400).rename('Rain_mm');
+          })
+          .sum()
+          .rename('Rain_total_mm');
+
+        return rainTotal;
+      })
+    );
+
+    // Pixel-wise median across 5 models
+    var medianImg = modelImages.median();
+
+    var stats = medianImg.reduceRegions({
+      collection: districts,
+      reducer:    ee.Reducer.mean(),
+      scale:      9000
+    });
+
+    return stats.map(function(f) {
+      return f.set({
+        'Year':          year,
+        'District':      f.get('NAME_3'),
+        'Rain_total_mm': f.get('mean')
+      });
+    });
+  })
+).flatten();
+
+var finalRAIN = rainTable.select([
+  'Year', 'District', 'Rain_total_mm'
+]);
+
+// --- Checks ---
+print('Total rows (expect 20):', finalRAIN.size());
+print('Sample (first 20):', finalRAIN.limit(20));
+print('Rain_total_mm stats (expect 30–250 mm):',
+      finalRAIN.aggregate_stats('Rain_total_mm'));
+
+// Flag suspicious low values — should be 0 rows
+var lowRain = finalRAIN.filter(ee.Filter.lt('Rain_total_mm', 5));
+print('Rows with Rain < 5mm (expect 0):', lowRain.size());
+
+// Flag negative values — must be 0 rows
+var negRain = finalRAIN.filter(ee.Filter.lt('Rain_total_mm', 0));
+print('Negative rainfall rows (expect 0):', negRain.size());
+
+Export.table.toDrive({
+  collection:  finalRAIN,
+  description: 'CMIP6_Rain_NovApr_2026_2030',
+  fileFormat:  'CSV'
+});
+// =====================================================================
+// SECTION 4 — VPD (Vapor Pressure Deficit) — CORRECTED
+// Fix: Using 'hurs' (relative humidity %) instead of 'huss'
+// hurs is available in all 5 CMIP6 models consistently
+// Formula: VPD = es(Tair) × (1 - hurs/100), clamped >= 0
+//   Tetens FAO: es = 0.6108 × exp(17.27×T / (T+237.3))
+// This is equivalent to the ERA5 dewpoint approach in training
+// Training VPD_kPa range: 1.25–2.65 kPa
+// Expected future range: 1.0–3.5 kPa
+// Output: 20 rows (4 districts × 5 years)
+// =====================================================================
+
+var districts = ee.FeatureCollection(
+  'projects/ee-ahsanahsan520/assets/multan_districts'
+).filter(ee.Filter.inList('NAME_3', [
+  'Multan', 'Lodhran', 'Khanewal', 'Vehari'
+]));
+
+var MODELS   = ['ACCESS-CM2', 'MPI-ESM1-2-HR', 'MIROC6',
+                'INM-CM5-0', 'NorESM2-MM'];
+var SCENARIO = 'ssp245';
+var YEARS    = ee.List.sequence(2026, 2030);
+
+var vpdTable = ee.FeatureCollection(
+  YEARS.map(function(year) {
+    year = ee.Number(year);
+
+    var start = ee.Date.fromYMD(year, 3, 1);
+    var end   = ee.Date.fromYMD(year, 4, 30);
+
+    var modelImages = ee.ImageCollection(
+      ee.List(MODELS).map(function(model) {
+        var col = ee.ImageCollection('NASA/GDDP-CMIP6')
+          .filter(ee.Filter.eq('model',    model))
+          .filter(ee.Filter.eq('scenario', SCENARIO))
+          .filterDate(start, end.advance(1, 'day'))
+          .select(['tas', 'hurs']); // mean air temp (K), relative humidity (%)
+
+        // Seasonal mean of both bands
+        var meanImg = col.mean();
+
+        // Step 1: Air temp K → C
+        var tair = meanImg.select('tas')
+          .subtract(273.15)
+          .rename('Tair_C');
+
+        // Step 2: Saturation vapor pressure es(Tair)
+        // Tetens FAO standard — same as training
+        var es = tair.expression(
+          '0.6108 * exp((17.27 * T) / (T + 237.3))',
+          {'T': tair}
+        ).rename('es_kPa');
+
+        // Step 3: Actual vapor pressure from relative humidity
+        // ea = (hurs / 100) × es
+        // Simpler and more direct than specific humidity approach
+        var hurs = meanImg.select('hurs').rename('hurs');
+        var ea = es.multiply(hurs.divide(100))
+          .rename('ea_kPa');
+
+        // Step 4: VPD = es - ea, clamped >= 0
+        var vpd = es.subtract(ea)
+          .max(0)
+          .rename('VPD_kPa');
+
+        return vpd;
+      })
+    );
+
+    // Pixel-wise median across 5 models
+    var medianImg = modelImages.median();
+
+    var stats = medianImg.reduceRegions({
+      collection: districts,
+      reducer:    ee.Reducer.mean(),
+      scale:      9000
+    });
+
+    return stats.map(function(f) {
+      return f.set({
+        'Year':     year,
+        'District': f.get('NAME_3'),
+        'VPD_kPa':  f.get('mean')
+      });
+    });
+  })
+).flatten();
+
+var finalVPD = vpdTable.select([
+  'Year', 'District', 'VPD_kPa'
+]);
+
+// --- Checks ---
+print('Total rows (expect 20):', finalVPD.size());
+print('Sample (first 20):', finalVPD.limit(20));
+print('VPD_kPa stats (expect 1.0–3.5 kPa):',
+      finalVPD.aggregate_stats('VPD_kPa'));
+
+// Negative VPD must be 0 — clamped in formula
+var negVPD = finalVPD.filter(ee.Filter.lt('VPD_kPa', 0));
+print('Negative VPD rows (expect 0):', negVPD.size());
+
+Export.table.toDrive({
+  collection:  finalVPD,
+  description: 'CMIP6_VPD_MarApr_2026_2030',
+  fileFormat:  'CSV'
+});

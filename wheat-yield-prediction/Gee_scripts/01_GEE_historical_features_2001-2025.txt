@@ -1,0 +1,963 @@
+// =====================================================
+// NDVI EXTRACTION — March–April Mean
+// Source: MODIS MOD13Q1 (250m, 16-day composite)
+// Window: March 1 – April 30 (grain filling + maturity)
+// Batch 1: 2001–2010
+// =====================================================
+
+var districts = ee.FeatureCollection(
+  'projects/ee-ahsanahsan520/assets/multan_districts'
+).filter(ee.Filter.inList('NAME_3', [
+  'Multan', 'Lodhran', 'Khanewal', 'Vehari'
+]));
+
+var modisNDVI = ee.ImageCollection('MODIS/061/MOD13Q1')
+  .select('NDVI');
+
+// =====================================================
+// CHANGE ONLY THIS LINE FOR EACH BATCH
+// Batch 1: 2001–2010
+// Batch 2: 2011–2020
+// Batch 3: 2021–2025
+// =====================================================
+var years = ee.List.sequence(2021, 2025);
+
+var ndviTable = ee.FeatureCollection(
+  years.map(function(year) {
+    year = ee.Number(year);
+
+    var startDate = ee.Date.fromYMD(year, 3, 1);
+    var endDate   = ee.Date.fromYMD(year, 4, 30);
+
+    var ndviImage = modisNDVI
+      .filterDate(startDate, endDate.advance(1, 'day'))
+      .mean()
+      .multiply(0.0001)
+      .rename('NDVI_mean');
+
+    var stats = ndviImage.reduceRegions({
+      collection: districts,
+      reducer: ee.Reducer.mean(),
+      scale: 250
+    });
+
+    return stats.map(function(f) {
+      return f.set({
+        'Year':      year,
+        'District':  f.get('NAME_3'),
+        'NDVI_mean': f.get('mean')
+      });
+    });
+  })
+).flatten();
+
+var finalNDVI = ndviTable.select(['Year', 'District', 'NDVI_mean']);
+
+print('NDVI Table (first 20):', finalNDVI.limit(20));
+print('Total rows:', finalNDVI.size());
+
+Export.table.toDrive({
+  collection:  finalNDVI,
+  description: 'NDVI_MarApr_2021_2025',
+  fileFormat:  'CSV'
+});
+
+// =====================================================
+// NDVI EXTRACTION — March–April Mean
+// WITH MODIS Cropland Mask (MCD12Q1)
+// Safe fallback if land cover image missing for any year
+// Source: MODIS MOD13Q1 (250m, 16-day composite)
+// Window: March 1 – April 30 (grain filling + maturity)
+// Batch 1: 2001–2010
+// =====================================================
+
+var districts = ee.FeatureCollection(
+  'projects/ee-ahsanahsan520/assets/multan_districts'
+).filter(ee.Filter.inList('NAME_3', [
+  'Multan', 'Lodhran', 'Khanewal', 'Vehari'
+]));
+
+var modisNDVI = ee.ImageCollection('MODIS/061/MOD13Q1')
+  .select('NDVI');
+
+var modisLC = ee.ImageCollection('MODIS/061/MCD12Q1')
+  .select('LC_Type1');
+
+// =====================================================
+// CHANGE ONLY THIS LINE FOR EACH BATCH
+// Batch 1: 2001–2010
+// Batch 2: 2011–2020
+// Batch 3: 2021–2025
+// =====================================================
+var years = ee.List.sequence(2021, 2025);
+
+var ndviTable = ee.FeatureCollection(
+  years.map(function(year) {
+    year = ee.Number(year);
+
+    var startDate = ee.Date.fromYMD(year, 3, 1);
+    var endDate   = ee.Date.fromYMD(year, 4, 30);
+
+    // Get cropland mask for this specific year
+    var lcYear = ee.Date.fromYMD(year, 1, 1);
+    var lcCollection = modisLC
+      .filterDate(lcYear, lcYear.advance(1, 'year'));
+
+    var lcImage = lcCollection.first();
+
+    // Safe cropland mask with fallback
+    // If land cover image exists: use class 12 + 14
+    // If missing: fallback to ee.Image(1) = no masking
+    var cropMask = ee.Algorithms.If(
+      lcImage,
+      lcImage.eq(12).or(lcImage.eq(14)),
+      ee.Image(1)  // fallback — no mask applied
+    );
+    cropMask = ee.Image(cropMask);
+
+    // NDVI image March–April
+    var ndviImage = modisNDVI
+      .filterDate(startDate, endDate.advance(1, 'day'))
+      .mean()
+      .multiply(0.0001)
+      .rename('NDVI_mean');
+
+    // Apply crop mask safely
+    var ndviMasked = ndviImage.updateMask(cropMask);
+
+    // Zonal statistics on masked image
+    var stats = ndviMasked.reduceRegions({
+      collection: districts,
+      reducer: ee.Reducer.mean(),
+      scale: 250
+    });
+
+    return stats.map(function(f) {
+      return f.set({
+        'Year':      year,
+        'District':  f.get('NAME_3'),
+        'NDVI_mean': f.get('mean')
+      });
+    });
+  })
+).flatten();
+
+var finalNDVI = ndviTable.select(['Year', 'District', 'NDVI_mean']);
+
+print('NDVI Table with Crop Mask (first 20):', finalNDVI.limit(20));
+print('Total rows:', finalNDVI.size());
+
+// Null check — all rows should have valid NDVI
+var nullCheck = finalNDVI.filter(ee.Filter.notNull(['NDVI_mean']));
+print('Rows with valid NDVI (should equal total rows):', nullCheck.size());
+
+Export.table.toDrive({
+  collection:  finalNDVI,
+  description: 'NDVI_MarApr_CropMask_2021_2025',
+  fileFormat:  'CSV'
+});
+
+// =====================================================
+// LST EXTRACTION — November–April Mean
+// WITH Quality Control (QC) Masking
+// Source: MODIS MOD11A2 (1km, 8-day composite)
+// Window: November 1 (prev year) – April 30 (current year)
+// Full wheat season thermal profile
+// Batch 1: 2001–2010
+// =====================================================
+
+var districts = ee.FeatureCollection(
+  'projects/ee-ahsanahsan520/assets/multan_districts'
+).filter(ee.Filter.inList('NAME_3', [
+  'Multan', 'Lodhran', 'Khanewal', 'Vehari'
+]));
+
+// Load LST with QC band
+var modisLST = ee.ImageCollection('MODIS/061/MOD11A2')
+  .select(['LST_Day_1km', 'QC_Day']);
+
+// Apply QC mask — keep only good quality pixels (QC == 0)
+// QC = 0 means LST produced, good quality, not necessary to examine
+var lstFiltered = modisLST.map(function(img) {
+  var qc   = img.select('QC_Day');
+  var mask = qc.bitwiseAnd(3).eq(0); // bits 0-1 = 00 means good quality
+  return img.select('LST_Day_1km').updateMask(mask);
+});
+
+// =====================================================
+// CHANGE ONLY THIS LINE FOR EACH BATCH
+// Batch 1: 2001–2010
+// Batch 2: 2011–2020
+// Batch 3: 2021–2025
+// =====================================================
+var years = ee.List.sequence(2021, 2025);
+
+var lstTable = ee.FeatureCollection(
+  years.map(function(year) {
+    year = ee.Number(year);
+
+    // November of PREVIOUS year to April of current year
+    var startDate = ee.Date.fromYMD(year.subtract(1), 11, 1);
+    var endDate   = ee.Date.fromYMD(year, 4, 30);
+
+    // Mean LST from QC-filtered collection
+    // Apply scale factor and convert Kelvin to Celsius
+    var lstImage = lstFiltered
+      .filterDate(startDate, endDate.advance(1, 'day'))
+      .mean()
+      .multiply(0.02)
+      .subtract(273.15)
+      .rename('LST_mean_C');
+
+    // Zonal statistics per district
+    var stats = lstImage.reduceRegions({
+      collection: districts,
+      reducer: ee.Reducer.mean(),
+      scale: 1000
+    });
+
+    return stats.map(function(f) {
+      return f.set({
+        'Year':       year,
+        'District':   f.get('NAME_3'),
+        'LST_mean_C': f.get('mean')
+      });
+    });
+  })
+).flatten();
+
+var finalLST = lstTable.select(['Year', 'District', 'LST_mean_C']);
+
+print('LST Table with QC Mask (first 20):', finalLST.limit(20));
+print('Total rows:', finalLST.size());
+
+// Null check
+var nullCheck = finalLST.filter(ee.Filter.notNull(['LST_mean_C']));
+print('Rows with valid LST (should equal total rows):', nullCheck.size());
+
+Export.table.toDrive({
+  collection:  finalLST,
+  description: 'LST_NovApr_QC_2021_2025',
+  fileFormat:  'CSV'
+});
+
+// =====================================================
+// RAINFALL EXTRACTION — November–April Total
+// Source: ERA5-Land Daily Aggregated
+// Window: November 1 (prev year) – April 30 (current year)
+// Full wheat season total precipitation
+// Units: meters → converted to millimeters
+// Batch 1: 2001–2010
+// =====================================================
+
+var districts = ee.FeatureCollection(
+  'projects/ee-ahsanahsan520/assets/multan_districts'
+).filter(ee.Filter.inList('NAME_3', [
+  'Multan', 'Lodhran', 'Khanewal', 'Vehari'
+]));
+
+// Load ERA5-Land daily precipitation
+var era5Rain = ee.ImageCollection('ECMWF/ERA5_LAND/DAILY_AGGR')
+  .select('total_precipitation_sum');
+
+// =====================================================
+// CHANGE ONLY THIS LINE FOR EACH BATCH
+// Batch 1: 2001–2010
+// Batch 2: 2011–2020
+// Batch 3: 2021–2025
+// =====================================================
+var years = ee.List.sequence(2021, 2025);
+
+var rainTable = ee.FeatureCollection(
+  years.map(function(year) {
+    year = ee.Number(year);
+
+    // November of PREVIOUS year to April of current year
+    var startDate = ee.Date.fromYMD(year.subtract(1), 11, 1);
+    var endDate   = ee.Date.fromYMD(year, 4, 30);
+
+    // Sum all daily rainfall over season
+    // Multiply by 1000 to convert meters to millimeters
+    var rainImage = era5Rain
+      .filterDate(startDate, endDate.advance(1, 'day'))
+      .sum()
+      .multiply(1000)
+      .rename('Rain_total_mm');
+
+    // Zonal statistics per district
+    var stats = rainImage.reduceRegions({
+      collection: districts,
+      reducer: ee.Reducer.mean(),
+      scale: 9000
+    });
+
+    return stats.map(function(f) {
+      return f.set({
+        'Year':          year,
+        'District':      f.get('NAME_3'),
+        'Rain_total_mm': f.get('mean')
+      });
+    });
+  })
+).flatten();
+
+var finalRAIN = rainTable.select(['Year', 'District', 'Rain_total_mm']);
+
+print('Rainfall Table (first 20):', finalRAIN.limit(20));
+print('Total rows:', finalRAIN.size());
+
+// Null check
+var nullCheck = finalRAIN.filter(ee.Filter.notNull(['Rain_total_mm']));
+print('Rows with valid Rainfall (should equal total rows):', nullCheck.size());
+
+// Sanity check — print min and max values
+// Expected range for Multan wheat season: 30–250 mm
+var rainStats = finalRAIN.aggregate_stats('Rain_total_mm');
+print('Rainfall statistics:', rainStats);
+
+Export.table.toDrive({
+  collection:  finalRAIN,
+  description: 'RAIN_NovApr_2021_2025',
+  fileFormat:  'CSV'
+});
+// =====================================================
+// VPD EXTRACTION — March–April Mean
+// Source: ERA5-Land Daily Aggregated
+// Window: March 1 – April 30 (grain filling + maturity)
+// Method: VPD = es(Tair) - ea(Tdew), clamped to >= 0
+// Using Tetens formula (FAO standard)
+// Units: kPa
+// Batch 1: 2001–2010
+// =====================================================
+
+var districts = ee.FeatureCollection(
+  'projects/ee-ahsanahsan520/assets/multan_districts'
+).filter(ee.Filter.inList('NAME_3', [
+  'Multan', 'Lodhran', 'Khanewal', 'Vehari'
+]));
+
+// Load ERA5-Land air temperature and dew point
+var era5 = ee.ImageCollection('ECMWF/ERA5_LAND/DAILY_AGGR')
+  .select([
+    'temperature_2m',
+    'dewpoint_temperature_2m'
+  ]);
+
+// =====================================================
+// CHANGE ONLY THIS LINE FOR EACH BATCH
+// Batch 1: 2001–2010
+// Batch 2: 2011–2020
+// Batch 3: 2021–2025
+// =====================================================
+var years = ee.List.sequence(2021, 2025);
+
+var vpdTable = ee.FeatureCollection(
+  years.map(function(year) {
+    year = ee.Number(year);
+
+    // March 1 to April 30 of same year
+    var startDate = ee.Date.fromYMD(year, 3, 1);
+    var endDate   = ee.Date.fromYMD(year, 4, 30);
+
+    // Filter to March-April window
+    var era5Season = era5
+      .filterDate(startDate, endDate.advance(1, 'day'));
+
+    // Step 1: Convert Kelvin to Celsius
+    var meanImage = era5Season.mean();
+
+    var tair = meanImage
+      .select('temperature_2m')
+      .subtract(273.15)
+      .rename('Tair_C');
+
+    var tdew = meanImage
+      .select('dewpoint_temperature_2m')
+      .subtract(273.15)
+      .rename('Tdew_C');
+
+    // Step 2: Saturation vapor pressure es(Tair)
+    // Tetens formula — FAO standard
+    var es = tair
+      .expression(
+        '0.6108 * exp((17.27 * T) / (T + 237.3))',
+        {'T': tair}
+      )
+      .rename('es_kPa');
+
+    // Step 3: Actual vapor pressure ea(Tdew)
+    var ea = tdew
+      .expression(
+        '0.6108 * exp((17.27 * Td) / (Td + 237.3))',
+        {'Td': tdew}
+      )
+      .rename('ea_kPa');
+
+    // Step 4: VPD = es - ea
+    // Clamped to >= 0 (physical constraint)
+    // Negative values can occur due to ERA5 rounding errors
+    // where Tdew slightly exceeds Tair — not physically real
+    var vpd = es
+      .subtract(ea)
+      .max(0)
+      .rename('VPD_kPa');
+
+    // Zonal statistics per district
+    var stats = vpd.reduceRegions({
+      collection: districts,
+      reducer: ee.Reducer.mean(),
+      scale: 9000
+    });
+
+    return stats.map(function(f) {
+      return f.set({
+        'Year':     year,
+        'District': f.get('NAME_3'),
+        'VPD_kPa':  f.get('mean')
+      });
+    });
+  })
+).flatten();
+
+var finalVPD = vpdTable.select(['Year', 'District', 'VPD_kPa']);
+
+print('VPD Table (first 20):', finalVPD.limit(20));
+print('Total rows:', finalVPD.size());
+
+// Null check
+var nullCheck = finalVPD.filter(ee.Filter.notNull(['VPD_kPa']));
+print('Rows with valid VPD (should equal total rows):', nullCheck.size());
+
+// Sanity check
+// Expected range for Multan March-April: 0.5 – 2.5 kPa
+// Minimum should now be exactly 0 or above — never negative
+var vpdStats = finalVPD.aggregate_stats('VPD_kPa');
+print('VPD statistics (min should be >= 0):', vpdStats);
+
+Export.table.toDrive({
+  collection:  finalVPD,
+  description: 'VPD_MarApr_2021_2025',
+  fileFormat:  'CSV'
+});
+
+// =====================================================
+// SOIL MOISTURE EXTRACTION — November–April Mean
+// Source: ERA5-Land Daily Aggregated
+// Window: November 1 (prev year) – April 30 (current year)
+// Layer: Volumetric soil water layer 1 (0–7cm top layer)
+// Units: m³/m³
+// NOTE: Extra variable — kept for reference only
+// Not included in main model unless correlation justifies
+// Batch 1: 2001–2010
+// =====================================================
+
+var districts = ee.FeatureCollection(
+  'projects/ee-ahsanahsan520/assets/multan_districts'
+).filter(ee.Filter.inList('NAME_3', [
+  'Multan', 'Lodhran', 'Khanewal', 'Vehari'
+]));
+
+// Load ERA5-Land soil moisture top layer
+var era5SM = ee.ImageCollection('ECMWF/ERA5_LAND/DAILY_AGGR')
+  .select('volumetric_soil_water_layer_1');
+
+// =====================================================
+// CHANGE ONLY THIS LINE FOR EACH BATCH
+// Batch 1: 2001–2010
+// Batch 2: 2011–2020
+// Batch 3: 2021–2025
+// =====================================================
+var years = ee.List.sequence(2021, 2025);
+
+var smTable = ee.FeatureCollection(
+  years.map(function(year) {
+    year = ee.Number(year);
+
+    // November of PREVIOUS year to April of current year
+    var startDate = ee.Date.fromYMD(year.subtract(1), 11, 1);
+    var endDate   = ee.Date.fromYMD(year, 4, 30);
+
+    // Mean soil moisture over full wheat season
+    var smImage = era5SM
+      .filterDate(startDate, endDate.advance(1, 'day'))
+      .mean()
+      .rename('SoilMoisture_m3m3');
+
+    // Zonal statistics per district
+    var stats = smImage.reduceRegions({
+      collection: districts,
+      reducer: ee.Reducer.mean(),
+      scale: 9000
+    });
+
+    return stats.map(function(f) {
+      return f.set({
+        'Year':               year,
+        'District':           f.get('NAME_3'),
+        'SoilMoisture_m3m3':  f.get('mean')
+      });
+    });
+  })
+).flatten();
+
+var finalSM = smTable.select([
+  'Year', 'District', 'SoilMoisture_m3m3'
+]);
+
+print('Soil Moisture Table (first 20):', finalSM.limit(20));
+print('Total rows:', finalSM.size());
+
+// Null check
+var nullCheck = finalSM.filter(
+  ee.Filter.notNull(['SoilMoisture_m3m3'])
+);
+print('Rows with valid SM (should equal total rows):', nullCheck.size());
+
+// Sanity check
+// Expected range for Multan: 0.10 – 0.35 m3/m3
+var smStats = finalSM.aggregate_stats('SoilMoisture_m3m3');
+print('Soil Moisture statistics:', smStats);
+
+Export.table.toDrive({
+  collection:  finalSM,
+  description: 'SoilMoisture_NovApr_2021_2025',
+  fileFormat:  'CSV'
+});
+
+// =====================================================
+// EVI EXTRACTION — March–April Mean
+// Source: MODIS MOD13Q1 (250m, 16-day composite)
+// Window: March 1 – April 30 (grain filling + maturity)
+// No crop mask version
+// Batch 1: 2001–2010
+// =====================================================
+
+var districts = ee.FeatureCollection(
+  'projects/ee-ahsanahsan520/assets/multan_districts'
+).filter(ee.Filter.inList('NAME_3', [
+  'Multan', 'Lodhran', 'Khanewal', 'Vehari'
+]));
+
+// Load MODIS EVI — same product as NDVI
+var modisEVI = ee.ImageCollection('MODIS/061/MOD13Q1')
+  .select('EVI');
+
+// =====================================================
+// CHANGE ONLY THIS LINE FOR EACH BATCH
+// Batch 1: 2001–2010
+// Batch 2: 2011–2020
+// Batch 3: 2021–2025
+// =====================================================
+var years = ee.List.sequence(2021, 2025);
+
+var eviTable = ee.FeatureCollection(
+  years.map(function(year) {
+    year = ee.Number(year);
+
+    // March 1 to April 30 of same year
+    var startDate = ee.Date.fromYMD(year, 3, 1);
+    var endDate   = ee.Date.fromYMD(year, 4, 30);
+
+    // Filter, mean composite, apply scale factor
+    // EVI scale factor is same as NDVI: 0.0001
+    var eviImage = modisEVI
+      .filterDate(startDate, endDate.advance(1, 'day'))
+      .mean()
+      .multiply(0.0001)
+      .rename('EVI_mean');
+
+    // Zonal statistics per district
+    var stats = eviImage.reduceRegions({
+      collection: districts,
+      reducer: ee.Reducer.mean(),
+      scale: 250
+    });
+
+    return stats.map(function(f) {
+      return f.set({
+        'Year':     year,
+        'District': f.get('NAME_3'),
+        'EVI_mean': f.get('mean')
+      });
+    });
+  })
+).flatten();
+
+var finalEVI = eviTable.select(['Year', 'District', 'EVI_mean']);
+
+print('EVI Table (first 20):', finalEVI.limit(20));
+print('Total rows:', finalEVI.size());
+
+// Null check
+var nullCheck = finalEVI.filter(ee.Filter.notNull(['EVI_mean']));
+print('Rows with valid EVI (should equal total rows):', nullCheck.size());
+
+// Sanity check
+// Expected range for Multan wheat March-April: 0.15 – 0.55
+var eviStats = finalEVI.aggregate_stats('EVI_mean');
+print('EVI statistics (expected 0.15-0.55):', eviStats);
+
+Export.table.toDrive({
+  collection:  finalEVI,
+  description: 'EVI_MarApr_2021_2025',
+  fileFormat:  'CSV'
+});
+
+// =====================================================
+// EVI EXTRACTION — March–April Mean
+// WITH MODIS Cropland Mask (MCD12Q1)
+// Safe fallback if land cover image missing for any year
+// Source: MODIS MOD13Q1 (250m, 16-day composite)
+// Window: March 1 – April 30 (grain filling + maturity)
+// Batch 1: 2001–2010
+// =====================================================
+
+var districts = ee.FeatureCollection(
+  'projects/ee-ahsanahsan520/assets/multan_districts'
+).filter(ee.Filter.inList('NAME_3', [
+  'Multan', 'Lodhran', 'Khanewal', 'Vehari'
+]));
+
+// Load MODIS EVI
+var modisEVI = ee.ImageCollection('MODIS/061/MOD13Q1')
+  .select('EVI');
+
+// Load MODIS Land Cover for crop mask
+var modisLC = ee.ImageCollection('MODIS/061/MCD12Q1')
+  .select('LC_Type1');
+
+// =====================================================
+// CHANGE ONLY THIS LINE FOR EACH BATCH
+// Batch 1: 2001–2010
+// Batch 2: 2011–2020
+// Batch 3: 2021–2025
+// =====================================================
+var years = ee.List.sequence(2021, 2025);
+
+var eviTable = ee.FeatureCollection(
+  years.map(function(year) {
+    year = ee.Number(year);
+
+    // March 1 to April 30 of same year
+    var startDate = ee.Date.fromYMD(year, 3, 1);
+    var endDate   = ee.Date.fromYMD(year, 4, 30);
+
+    // Get cropland mask for this specific year
+    var lcYear = ee.Date.fromYMD(year, 1, 1);
+    var lcImage = modisLC
+      .filterDate(lcYear, lcYear.advance(1, 'year'))
+      .first();
+
+    // Safe cropland mask with fallback
+    // Class 12 = Croplands
+    // Class 14 = Cropland/Natural Vegetation Mosaic
+    // Fallback = ee.Image(1) if land cover missing
+    var cropMask = ee.Algorithms.If(
+      lcImage,
+      lcImage.eq(12).or(lcImage.eq(14)),
+      ee.Image(1)
+    );
+    cropMask = ee.Image(cropMask);
+
+    // EVI image March-April
+    var eviImage = modisEVI
+      .filterDate(startDate, endDate.advance(1, 'day'))
+      .mean()
+      .multiply(0.0001)
+      .rename('EVI_mean');
+
+    // Apply crop mask
+    var eviMasked = eviImage.updateMask(cropMask);
+
+    // Zonal statistics on masked image
+    var stats = eviMasked.reduceRegions({
+      collection: districts,
+      reducer: ee.Reducer.mean(),
+      scale: 250
+    });
+
+    return stats.map(function(f) {
+      return f.set({
+        'Year':     year,
+        'District': f.get('NAME_3'),
+        'EVI_mean': f.get('mean')
+      });
+    });
+  })
+).flatten();
+
+var finalEVI = eviTable.select(['Year', 'District', 'EVI_mean']);
+
+print('EVI Table with Crop Mask (first 20):', finalEVI.limit(20));
+print('Total rows:', finalEVI.size());
+
+// Null check
+var nullCheck = finalEVI.filter(ee.Filter.notNull(['EVI_mean']));
+print('Rows with valid EVI (should equal total rows):', nullCheck.size());
+
+// Sanity check
+// Expected range for Multan wheat March-April: 0.15 – 0.55
+// Crop masked values typically slightly higher than unmasked
+// because non-crop bare soil pixels are removed
+var eviStats = finalEVI.aggregate_stats('EVI_mean');
+print('EVI statistics (expected 0.15-0.55):', eviStats);
+
+Export.table.toDrive({
+  collection:  finalEVI,
+  description: 'EVI_MarApr_CropMask_2021_2025',
+  fileFormat:  'CSV'
+});
+
+// =====================================================
+// MAXIMUM TEMPERATURE + HEAT STRESS DAYS
+// Source: ERA5-Land Daily Aggregated
+// Window: March 1 – April 30 (grain filling + maturity)
+// Variable 1: Mean of daily Tmax (Celsius)
+// Variable 2: Count of days where Tmax > 34°C
+// Agronomic importance: Heat stress above 34°C
+// stops grain filling in wheat (critical for Multan)
+// Batch 1: 2001–2010
+// =====================================================
+
+var districts = ee.FeatureCollection(
+  'projects/ee-ahsanahsan520/assets/multan_districts'
+).filter(ee.Filter.inList('NAME_3', [
+  'Multan', 'Lodhran', 'Khanewal', 'Vehari'
+]));
+
+// Load ERA5-Land daily maximum temperature
+var era5Tmax = ee.ImageCollection('ECMWF/ERA5_LAND/DAILY_AGGR')
+  .select('temperature_2m_max');
+
+// =====================================================
+// CHANGE ONLY THIS LINE FOR EACH BATCH
+// Batch 1: 2001–2010
+// Batch 2: 2011–2020
+// Batch 3: 2021–2025
+// =====================================================
+var years = ee.List.sequence(2021, 2025);
+
+var tmaxTable = ee.FeatureCollection(
+  years.map(function(year) {
+    year = ee.Number(year);
+
+    // March 1 to April 30 of same year
+    var startDate = ee.Date.fromYMD(year, 3, 1);
+    var endDate   = ee.Date.fromYMD(year, 4, 30);
+
+    // Filter to March-April season
+    var seasonCollection = era5Tmax
+      .filterDate(startDate, endDate.advance(1, 'day'));
+
+    // -------------------------------------------------
+    // Variable 1: Mean of daily Tmax
+    // Convert Kelvin to Celsius
+    // -------------------------------------------------
+    var tmaxImage = seasonCollection
+      .mean()
+      .subtract(273.15)
+      .rename('Tmax_mean_C');
+
+    // -------------------------------------------------
+    // Variable 2: Heat Stress Days (Tmax > 34°C)
+    // 34°C = 307.15 Kelvin
+    // Each daily image returns 1 if > 34°C, else 0
+    // Sum gives total count of heat stress days
+    // Expected range for Multan March-April: 10–50 days
+    // -------------------------------------------------
+    var heatStressDays = seasonCollection
+      .map(function(img) {
+        return img
+          .gt(307.15)        // 34 + 273.15 = 307.15 Kelvin
+          .rename('HeatStress_days');
+      })
+      .sum()
+      .rename('HeatStress_days');
+
+    // -------------------------------------------------
+    // Combine both variables into one image
+    // -------------------------------------------------
+    var combined = tmaxImage.addBands(heatStressDays);
+
+    // Zonal statistics per district
+    var stats = combined.reduceRegions({
+      collection: districts,
+      reducer: ee.Reducer.mean(),
+      scale: 9000
+    });
+
+    return stats.map(function(f) {
+      return f.set({
+        'Year':             year,
+        'District':         f.get('NAME_3'),
+        'Tmax_mean_C':      f.get('Tmax_mean_C'),
+        'HeatStress_days':  f.get('HeatStress_days')
+      });
+    });
+  })
+).flatten();
+
+var finalTMAX = tmaxTable.select([
+  'Year', 'District', 'Tmax_mean_C', 'HeatStress_days'
+]);
+
+print('Tmax + Heat Stress Days Table (first 20):', finalTMAX.limit(20));
+print('Total rows:', finalTMAX.size());
+
+// Null checks
+var nullCheckTmax = finalTMAX.filter(
+  ee.Filter.notNull(['Tmax_mean_C'])
+);
+print('Rows with valid Tmax (should equal total):', 
+      nullCheckTmax.size());
+
+var nullCheckHS = finalTMAX.filter(
+  ee.Filter.notNull(['HeatStress_days'])
+);
+print('Rows with valid HeatStress_days (should equal total):', 
+      nullCheckHS.size());
+
+// Sanity checks
+// Tmax expected: 28–42°C for Multan March-April
+// HeatStress_days expected: 10–50 days out of ~61 total days
+var tmaxStats = finalTMAX.aggregate_stats('Tmax_mean_C');
+print('Tmax statistics (expected 28-42 C):', tmaxStats);
+
+var hsStats = finalTMAX.aggregate_stats('HeatStress_days');
+print('Heat Stress Days statistics (expected 10-50 days):', hsStats);
+
+Export.table.toDrive({
+  collection:  finalTMAX,
+  description: 'Tmax_HeatStress_MarApr_2021_2025',
+  fileFormat:  'CSV'
+});
+
+// =====================================================
+// MINIMUM TEMPERATURE + COLD STRESS DAYS
+// Source: ERA5-Land Daily Aggregated
+// Window: November 1 (prev year) – February 28 (current year)
+// Variable 1: Mean of daily Tmin (Celsius)
+// Variable 2: Count of days where Tmin < 5°C
+// Agronomic importance: Cold stress below 5°C
+// damages germination and tillering in wheat
+// Critical for Multan Division establishment phase
+// Batch 1: 2001–2010
+// =====================================================
+
+var districts = ee.FeatureCollection(
+  'projects/ee-ahsanahsan520/assets/multan_districts'
+).filter(ee.Filter.inList('NAME_3', [
+  'Multan', 'Lodhran', 'Khanewal', 'Vehari'
+]));
+
+// Load ERA5-Land daily minimum temperature
+var era5Tmin = ee.ImageCollection('ECMWF/ERA5_LAND/DAILY_AGGR')
+  .select('temperature_2m_min');
+
+// =====================================================
+// CHANGE ONLY THIS LINE FOR EACH BATCH
+// Batch 1: 2001–2010
+// Batch 2: 2011–2020
+// Batch 3: 2021–2025
+// =====================================================
+var years = ee.List.sequence(2021, 2025);
+
+var tminTable = ee.FeatureCollection(
+  years.map(function(year) {
+    year = ee.Number(year);
+
+    // November of PREVIOUS year to February of current year
+    // Wheat establishment and tillering phase
+    var startDate = ee.Date.fromYMD(year.subtract(1), 11, 1);
+    var endDate   = ee.Date.fromYMD(year, 2, 28);
+
+    // Filter to Nov-Feb season
+    var seasonCollection = era5Tmin
+      .filterDate(startDate, endDate.advance(1, 'day'));
+
+    // -------------------------------------------------
+    // Variable 1: Mean of daily Tmin
+    // Convert Kelvin to Celsius
+    // -------------------------------------------------
+    var tminImage = seasonCollection
+      .mean()
+      .subtract(273.15)
+      .rename('Tmin_mean_C');
+
+    // -------------------------------------------------
+    // Variable 2: Cold Stress Days (Tmin < 5°C)
+    // 5°C = 278.15 Kelvin
+    // Each daily image returns 1 if < 5°C, else 0
+    // Sum gives total count of cold stress days
+    // Expected range for Multan Nov-Feb: 5–40 days
+    // Below 5°C damages germination and tillering
+    // Below 0°C causes frost damage to young plants
+    // -------------------------------------------------
+    var coldStressDays = seasonCollection
+      .map(function(img) {
+        return img
+          .lt(278.15)        // 5 + 273.15 = 278.15 Kelvin
+          .rename('ColdStress_days');
+      })
+      .sum()
+      .rename('ColdStress_days');
+
+    // -------------------------------------------------
+    // Combine both variables into one image
+    // -------------------------------------------------
+    var combined = tminImage.addBands(coldStressDays);
+
+    // Zonal statistics per district
+    var stats = combined.reduceRegions({
+      collection: districts,
+      reducer: ee.Reducer.mean(),
+      scale: 9000
+    });
+
+    return stats.map(function(f) {
+      return f.set({
+        'Year':            year,
+        'District':        f.get('NAME_3'),
+        'Tmin_mean_C':     f.get('Tmin_mean_C'),
+        'ColdStress_days': f.get('ColdStress_days')
+      });
+    });
+  })
+).flatten();
+
+var finalTMIN = tminTable.select([
+  'Year', 'District', 'Tmin_mean_C', 'ColdStress_days'
+]);
+
+print('Tmin + Cold Stress Days Table (first 20):', 
+      finalTMIN.limit(20));
+print('Total rows:', finalTMIN.size());
+
+// Null checks
+var nullCheckTmin = finalTMIN.filter(
+  ee.Filter.notNull(['Tmin_mean_C'])
+);
+print('Rows with valid Tmin (should equal total):', 
+      nullCheckTmin.size());
+
+var nullCheckCS = finalTMIN.filter(
+  ee.Filter.notNull(['ColdStress_days'])
+);
+print('Rows with valid ColdStress_days (should equal total):', 
+      nullCheckCS.size());
+
+// Sanity checks
+// Tmin expected: 2–15°C for Multan Nov-Feb
+// ColdStress_days expected: 5–40 days out of ~120 total days
+var tminStats = finalTMIN.aggregate_stats('Tmin_mean_C');
+print('Tmin statistics (expected 2-15 C):', tminStats);
+
+var csStats = finalTMIN.aggregate_stats('ColdStress_days');
+print('Cold Stress Days statistics (expected 5-40 days):', 
+      csStats);
+
+Export.table.toDrive({
+  collection:  finalTMIN,
+  description: 'Tmin_ColdStress_NovFeb_2021_2025',
+  fileFormat:  'CSV'
+});

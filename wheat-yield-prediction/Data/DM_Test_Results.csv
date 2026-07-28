@@ -1,0 +1,22 @@
+Benchmark,Challenger,DM_Statistic,p_value,Significant,Better_Model
+XGBoost,LSTM,0.8166,0.4142,No,LSTM
+XGBoost,TCN,1.0589,0.2897,No,TCN
+XGBoost,XGB+LSTM Hybrid,0.7818,0.4343,No,XGB+LSTM Hybrid
+XGBoost,TCN+XGB Hybrid,1.7061,0.088,YES *,TCN+XGB Hybrid
+XGBoost,LSTM+TCN Hybrid,1.9503,0.0511,YES *,LSTM+TCN Hybrid
+XGBoost,Triple Hybrid,2.0751,0.038,YES **,Triple Hybrid
+LSTM,TCN,0.8743,0.382,No,TCN
+LSTM,XGB+LSTM Hybrid,0.0657,0.9476,No,XGB+LSTM Hybrid
+LSTM,TCN+XGB Hybrid,1.7226,0.085,YES *,TCN+XGB Hybrid
+LSTM,LSTM+TCN Hybrid,2.1228,0.0338,YES **,LSTM+TCN Hybrid
+LSTM,Triple Hybrid,2.3275,0.0199,YES **,Triple Hybrid
+TCN,XGB+LSTM Hybrid,-0.8778,0.38,No,TCN
+TCN,TCN+XGB Hybrid,1.9735,0.0484,YES **,TCN+XGB Hybrid
+TCN,LSTM+TCN Hybrid,2.8255,0.0047,YES ***,LSTM+TCN Hybrid
+TCN,Triple Hybrid,2.7342,0.0063,YES ***,Triple Hybrid
+XGB+LSTM Hybrid,TCN+XGB Hybrid,1.7296,0.0837,YES *,TCN+XGB Hybrid
+XGB+LSTM Hybrid,LSTM+TCN Hybrid,2.1338,0.0329,YES **,LSTM+TCN Hybrid
+XGB+LSTM Hybrid,Triple Hybrid,2.3385,0.0194,YES **,Triple Hybrid
+TCN+XGB Hybrid,LSTM+TCN Hybrid,1.1972,0.2312,No,LSTM+TCN Hybrid
+TCN+XGB Hybrid,Triple Hybrid,1.0418,0.2975,No,Triple Hybrid
+LSTM+TCN Hybrid,Triple Hybrid,0.3818,0.7026,No,Triple Hybrid
