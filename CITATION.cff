@@ -1,10 +1,10 @@
 cff-version: 1.2.0
 message: "If you use this software or data, please cite it as below."
-title: "Hybrid ML-DL Ensemble for Spatio-Temporal Wheat Yield Prediction in Multan Division, Pakistan"
+title: "Hybrid ML-DL Ensemble for District-Scale Wheat Yield Prediction in Multan Division, Pakistan"
 authors:
   - family-names: "Ahmad"
     given-names: "Ahsan"
     orcid: "https://orcid.org/0009-0000-2206-859X"
-version: "1.0.1"
-date-released: "2026-07-28"
+version: "1.0.2"
+date-released: "2026-08-17"
 url: "https://github.com/ahsaan786/wheat-yield-prediction-multan"
