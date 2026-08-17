@@ -1,7 +1,7 @@
-# Hybrid ML–DL Ensemble for Spatio-Temporal Wheat Yield Prediction — Multan Division, Pakistan
+# Hybrid ML–DL Ensemble for District-Scale Wheat Yield Prediction — Multan Division, Pakistan
 
 Code and data accompanying the manuscript *"Development of a Hybrid Machine
-Learning–Deep Learning Ensemble for Spatio-Temporal Wheat Yield Prediction
+Learning–Deep Learning Ensemble for District-Scale Wheat Yield Prediction
 Using Earth Observation and Climate Data."*
 
 The pipeline predicts district-level winter-wheat yield across four districts of
@@ -31,7 +31,7 @@ A full description of every file and column is in **`data_dictionary.md`**.
 
 ### `Gee_scripts/`
 - `01_GEE_historical_features_2001-2025.txt` — extracts NDVI, LST, rainfall, temperature, dewpoint (for VPD), and soil moisture, 2001–2025.
-- `02_GEE_CMIP6_future_features_2026-2030.txt` — extracts CMIP6 SSP2-4.5 Tmax/heat-stress, Tmin/cold-stress, rainfall, and VPD, 2026–2030 (5-model median).
+- `02_GEE_CMIP6_future_features_2026-2030.txt` — extracts CMIP6 SSP2-4.5 Tmax/heat-stress, Tmin/cold-stress, rainfall, and VPD, 2026–2030 (5-model median: ACCESS-CM2, MPI-ESM1-2-HR, MIROC6, INM-CM5-0, NorESM2-MM).
 
 > These are JavaScript files saved as `.txt`; paste them into the Google Earth Engine Code Editor to run.
 
@@ -40,7 +40,7 @@ A full description of every file and column is in **`data_dictionary.md`**.
 - `Future_Features_ScenarioA_Primary_2026_2030.csv`, `Future_Features_ScenarioB_Reference_2026_2030.csv` — projection inputs (20 rows each).
 - `XGBoost_Results_Table.csv`, `LSTM_Results_Table.csv`, `TCN_Results_Table.csv` — standalone test-set predictions.
 - `SERWI_XGB_LSTM_Results_Table.csv`, `SERWI_TCN_XGB_Results_Table.csv`, `SERWI_LSTM_TCN_Results_Table.csv`, `SERWI_Triple_Results_Table.csv` — hybrid test-set predictions.
-- `Forecast_ScenarioA_Primary.csv`, `Forecast_ALL_Scenarios.csv`, `Full_Timeline_2001_2030_ScenarioA.csv` — 2026–2030 projections.
+- `Forecast_ScenarioA_Primary.csv`, `Forecast_ScenarioB_Reference.csv`, `Forecast_ALL_Scenarios.csv`, `Full_Timeline_2001_2030_ScenarioA.csv` — 2026–2030 projections.
 - `DM_Test_Results.csv` — Diebold–Mariano pairwise significance tests.
 
 ### `Notebooks/`
@@ -80,6 +80,18 @@ without re-training the earlier stages.
 
 ---
 
+## Modelling note — detrending and reported accuracy
+
+Wheat yield is modelled in two components: a per-district linear technology trend
+fitted on the pre-test years, and a climate-driven residual learned by the models.
+Detrending is a **training device only** — the district trend is added back to the
+model output before any metric is computed, so all reported R², RMSE and MAE values
+refer to **observed yield**, not to the residual. For the 2026–2030 projections the
+trend is held fixed at its 2025 value rather than extrapolated forward, so projected
+variation reflects the modelled climate response alone.
+
+---
+
 ## Environment
 
 See `requirements.txt`. Original runs used Google Colab (Python 3.10+).
@@ -96,12 +108,11 @@ pip install -r requirements.txt
 
 - **MODIS** MOD13Q1 (NDVI) and MOD11A2 (LST) — NASA LP DAAC via Google Earth Engine.
 - **ERA5-Land** (rainfall, temperature, dewpoint, soil moisture) and **CHIRPS** (rainfall) — via Google Earth Engine.
-- **NASA GDDP-CMIP6**, SSP2-4.5 — future climate projections.
+- **NASA GDDP-CMIP6**, SSP2-4.5, 5-model median — future climate projections.
 - **District-level wheat yield** — Punjab Bureau of Statistics (PBS) and Crop Reporting Service (CRS), Government of the Punjab.
 
 Yield is provided in maunds/acre (local unit); the manuscript reports errors in
-kg/ha (1 maund/acre ≈ 98.8 kg/ha). Reported R² refers to the detrended
-climate-residual target, not raw yield. See `data_dictionary.md`.
+kg/ha (1 maund/acre ≈ 98.8 kg/ha). See `data_dictionary.md`.
 
 ---
 

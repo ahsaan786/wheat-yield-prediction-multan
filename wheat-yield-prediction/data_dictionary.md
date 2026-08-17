@@ -14,8 +14,8 @@ Punjab, Pakistan** — Multan, Khanewal, Vehari, and Lodhran.
 | `Year` | Wheat season (harvest year) | year |
 | `District` | District name | — |
 | `Yield_maund_acre` | Observed wheat yield (target variable) | maunds/acre |
-| `NDVI_mean` | Mean NDVI, Mar–Apr (grain filling), MODIS MOD13Q1 | index (0–1) |
-| `LST_mean_C` | Mean land-surface temperature, Nov–Apr, MODIS MOD11A2 | °C |
+| `NDVI_mean` | Mean NDVI, Mar–Apr (grain filling), MODIS MOD13Q1, cropland-masked | index (0–1) |
+| `LST_mean_C` | Mean land-surface temperature, Nov–Apr, MODIS MOD11A2, QC-filtered | °C |
 | `Rain_log` | log1p of seasonal rainfall (Nov–Apr), CHIRPS/ERA5-Land | log(mm) |
 | `VPD_kPa` | Vapour-pressure deficit, Mar–Apr, ERA5-Land | kPa |
 | `HeatStress_log` | log1p of heat-stress days (Tmax > 34 °C, Mar–Apr) | log(days) |
@@ -24,8 +24,14 @@ Punjab, Pakistan** — Multan, Khanewal, Vehari, and Lodhran.
 > **Yield unit note.** `Yield_maund_acre` is in the local unit *maunds per acre*
 > (1 maund = 40 kg; 1 acre = 0.4047 ha, so **1 maund/acre ≈ 98.8 kg/ha**).
 > The manuscript reports errors (RMSE, MAE) in **kg/ha**; the conversion and the
-> two-component linear detrending are applied inside the notebooks. Reported R²
-> refers to the detrended climate-residual target, not raw yield.
+> two-component linear detrending are applied inside the notebooks.
+>
+> **Detrending note.** Detrending is a *training device only*. Models are fitted on
+> the climate residual, but the per-district linear trend is added back to the model
+> output before any metric is computed, so the reported **R², RMSE and MAE refer to
+> observed yield**, not to the residual. The interaction terms `NDVI×VPD` and
+> `LST×HeatStress` are derived inside the notebooks from the columns above and are
+> not stored separately.
 
 ---
 
@@ -33,7 +39,8 @@ Punjab, Pakistan** — Multan, Khanewal, Vehari, and Lodhran.
 `Future_Features_ScenarioA_Primary_2026_2030.csv` and
 `Future_Features_ScenarioB_Reference_2026_2030.csv` — 20 rows each
 (4 districts × 5 years). Same predictor columns as the training set (no yield),
-derived from NASA GDDP-CMIP6, SSP2-4.5, 5-model median.
+derived from NASA GDDP-CMIP6, SSP2-4.5, pixel-wise median of five GCMs
+(ACCESS-CM2, MPI-ESM1-2-HR, MIROC6, INM-CM5-0, NorESM2-MM).
 
 | Column | Description | Unit |
 |---|---|---|
@@ -44,26 +51,34 @@ derived from NASA GDDP-CMIP6, SSP2-4.5, 5-model median.
 - **Scenario A (Primary):** CMIP6 SSP2-4.5 climate with NDVI-trend extrapolation.
 - **Scenario B (Reference):** SSP2-4.5 with climate-driven NDVI regression (conservative stress bound).
 
+For the projection period the district technology trend is held fixed at its 2025
+value rather than extrapolated forward, so projected variation reflects the modelled
+climate response alone.
+
 ---
 
 ## 3. Model result tables
 Standalone: `XGBoost_Results_Table.csv`, `LSTM_Results_Table.csv`, `TCN_Results_Table.csv`
 Hybrids: `SERWI_XGB_LSTM_Results_Table.csv`, `SERWI_TCN_XGB_Results_Table.csv`,
 `SERWI_LSTM_TCN_Results_Table.csv`, `SERWI_Triple_Results_Table.csv`
-Test period 2021–2025.
+Test period 2021–2025 (20 rows = 4 districts × 5 years).
 
 | Column | Description | Unit |
 |---|---|---|
 | `Year` | Test year | year |
 | `District` | District name | — |
 | `Actual` | Observed yield | maunds/acre |
-| `Predicted` | Model-predicted yield | maunds/acre |
+| `Predicted` | Model-predicted yield (trend restored) | maunds/acre |
 | `Error` / `Residual` | Actual − Predicted | maunds/acre |
+
+> `Predicted` already includes the re-added district trend, so `Actual` and
+> `Predicted` are directly comparable observed-yield quantities.
 
 ---
 
 ## 4. Forecast tables
-`Forecast_ScenarioA_Primary.csv`, `Forecast_ALL_Scenarios.csv`
+`Forecast_ScenarioA_Primary.csv`, `Forecast_ScenarioB_Reference.csv`,
+`Forecast_ALL_Scenarios.csv`
 
 | Column | Description | Unit |
 |---|---|---|
@@ -75,6 +90,13 @@ Test period 2021–2025.
 
 `Full_Timeline_2001_2030_ScenarioA.csv` — combined historical (2001–2025) +
 projected (2026–2030) series per district, used for the timeline figures.
+
+| Column | Description | Unit |
+|---|---|---|
+| `Year` | 2001–2030 | year |
+| `District` | District name | — |
+| `Yield_kg_ha` | Observed (2001–2025) or projected (2026–2030) yield | kg/ha |
+| `Scenario` | `Historical` or scenario label | — |
 
 ---
 
