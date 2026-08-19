@@ -33,6 +33,8 @@ A full description of every file and column is in **`data_dictionary.md`**.
 - `01_GEE_historical_features_2001-2025.txt` — extracts NDVI, LST, rainfall, temperature, dewpoint (for VPD), and soil moisture, 2001–2025.
 - `02_GEE_CMIP6_future_features_2026-2030.txt` — extracts CMIP6 SSP2-4.5 Tmax/heat-stress, Tmin/cold-stress, rainfall, and VPD, 2026–2030 (5-model median: ACCESS-CM2, MPI-ESM1-2-HR, MIROC6, INM-CM5-0, NorESM2-MM).
 
+> CMIP6 supplies near-surface **air** temperature, whereas the historical thermal predictor is MODIS MOD11A2 **land-surface** temperature. Projected `LST_mean_C` is therefore not taken directly from CMIP6: it is constructed on the MODIS scale inside `Wheat_Future_Forecast_FINAL.ipynb` as the 2001–2020 district LST climatology plus the SSP2-4.5 temperature anomaly (division-mean ΔT = +0.48 °C over 2026–2030).
+
 > These are JavaScript files saved as `.txt`; paste them into the Google Earth Engine Code Editor to run.
 
 ### `Data/`
@@ -41,7 +43,11 @@ A full description of every file and column is in **`data_dictionary.md`**.
 - `XGBoost_Results_Table.csv`, `LSTM_Results_Table.csv`, `TCN_Results_Table.csv` — standalone test-set predictions.
 - `SERWI_XGB_LSTM_Results_Table.csv`, `SERWI_TCN_XGB_Results_Table.csv`, `SERWI_LSTM_TCN_Results_Table.csv`, `SERWI_Triple_Results_Table.csv` — hybrid test-set predictions.
 - `Forecast_ScenarioA_Primary.csv`, `Forecast_ScenarioB_Reference.csv`, `Forecast_ALL_Scenarios.csv`, `Full_Timeline_2001_2030_ScenarioA.csv` — 2026–2030 projections.
+- `Forecast_FrozenClimate_2001_2020.csv` — frozen-climate counterfactual run used to isolate the attributable climate effect.
+- `Forecast_Uncertainty_Table.csv` — per-district Scenario A vs B spread.
+- `Forecast_SERWI_Weights.csv` — per-district SERWI weights used for forecasting.
 - `DM_Test_Results.csv` — Diebold–Mariano pairwise significance tests.
+- `DM_Test_Results_HLN_BH.csv` — the same tests with the Harvey–Leybourne–Newbold small-sample correction and Benjamini–Hochberg FDR adjustment.
 
 ### `Notebooks/`
 - `XGBOOST_DRIVE.ipynb`, `LSTM_DRIVE.ipynb`, `TCN_DRIVE_FINAL.ipynb` — train the three standalone models.
@@ -92,6 +98,25 @@ variation reflects the modelled climate response alone.
 
 ---
 
+## Scenarios
+
+Both scenarios use **identical CMIP6 SSP2-4.5 climate forcing, including land-surface
+temperature**, and differ only in the assumed NDVI trajectory:
+
+- **Scenario A (primary)** — NDVI extrapolated from its historical trend.
+- **Scenario B (NDVI sensitivity case)** — NDVI regressed on projected LST.
+
+Because the underlying climate is the same in both runs, the difference between them
+measures sensitivity to the NDVI assumption alone and is **not** an uncertainty bound;
+Scenario B is a sensitivity case rather than a pessimistic scenario. Over 2026–2030 the
+two differ by only about 10 kg/ha at division level.
+
+A **frozen-climate counterfactual** (`Forecast_FrozenClimate_2001_2020.csv`) repeats the
+projection with the five climate predictors held at their 2001–2020 district means, so the
+difference from the SSP2-4.5 run isolates the attributable climate effect.
+
+---
+
 ## Environment
 
 See `requirements.txt`. Original runs used Google Colab (Python 3.10+).
@@ -124,4 +149,9 @@ apply **CC BY 4.0** to the data files if depositing on Zenodo/Mendeley Data.
 ## Citation
 
 If you use this code or data, please cite the associated article (citation to be
-added upon publication) and this repository.
+added upon publication) and this repository:
+
+> Ahmad, A. (2026). *Hybrid ML–DL Ensemble for District-Scale Wheat Yield Prediction in
+> Multan Division, Pakistan.* Zenodo. https://doi.org/10.5281/zenodo.21668885
+
+The DOI above is the concept DOI and always resolves to the latest deposited version.

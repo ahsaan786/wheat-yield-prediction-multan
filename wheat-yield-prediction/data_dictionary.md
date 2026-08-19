@@ -49,7 +49,16 @@ derived from NASA GDDP-CMIP6, SSP2-4.5, pixel-wise median of five GCMs
 | `NDVI_mean`, `LST_mean_C`, `Rain_log`, `VPD_kPa`, `HeatStress_log`, `ColdStress_log` | As defined above | as above |
 
 - **Scenario A (Primary):** CMIP6 SSP2-4.5 climate with NDVI-trend extrapolation.
-- **Scenario B (Reference):** SSP2-4.5 with climate-driven NDVI regression (conservative stress bound).
+- **Scenario B (NDVI sensitivity case):** the *same* SSP2-4.5 climate with NDVI regressed on projected LST.
+
+> **Both scenarios share identical climate forcing**, including `LST_mean_C`; they differ only in
+> `NDVI_mean` (and the derived `NDVI×VPD` interaction). The difference between them therefore
+> measures sensitivity to the NDVI assumption, and is not an uncertainty bound.
+>
+> **Projected LST note.** CMIP6 provides near-surface *air* temperature, while the historical
+> predictor is MODIS MOD11A2 *land-surface* temperature. Projected `LST_mean_C` is therefore
+> constructed on the MODIS scale as the 2001–2020 district LST climatology plus the SSP2-4.5
+> temperature anomaly for each projection year (division-mean ΔT = +0.48 °C over 2026–2030).
 
 For the projection period the district technology trend is held fixed at its 2025
 value rather than extrapolated forward, so projected variation reflects the modelled
@@ -88,6 +97,25 @@ Test period 2021–2025 (20 rows = 4 districts × 5 years).
 | `SERWI_XGB_LSTM`, `SERWI_TCN_XGB`, `SERWI_LSTM_TCN`, `SERWI_Triple` | Hybrid projected yield | maunds/acre |
 | `Scenario` | `ScenarioA_Primary` or `ScenarioB_Reference` | — |
 
+`Forecast_FrozenClimate_2001_2020.csv` — same columns as the forecast tables above, from a
+counterfactual run in which the five climate predictors (`LST_mean_C`, `Rain_log`, `VPD_kPa`,
+`HeatStress_log`, `ColdStress_log`) are held at their 2001–2020 district means while `NDVI_mean`
+and the frozen 2025 trend are unchanged. The difference from the Scenario A run gives the
+attributable climate effect.
+
+`Forecast_Uncertainty_Table.csv` — per-district summary of the Scenario A vs B spread.
+
+| Column | Description | Unit |
+|---|---|---|
+| `District` | District name | — |
+| `ScenA_mean`, `ScenB_mean` | 2026–2030 mean projected yield | kg/ha |
+| `ScenA_min`, `ScenA_max` | Range of Scenario A across 2026–2030 | kg/ha |
+| `A_minus_B` | Scenario A minus Scenario B | kg/ha |
+| `A_minus_B_pct` | Same difference relative to Scenario B | percentage points |
+
+`Forecast_SERWI_Weights.csv` — the per-district SERWI weights and bias corrections applied
+when constructing the hybrid forecasts.
+
 `Full_Timeline_2001_2030_ScenarioA.csv` — combined historical (2001–2025) +
 projected (2026–2030) series per district, used for the timeline figures.
 
@@ -110,6 +138,18 @@ projected (2026–2030) series per district, used for the timeline figures.
 | `p_value` | Two-sided p-value |
 | `Significant` | Yes/No at α = 0.05 |
 | `Better_Model` | Model with lower forecast error |
+
+`DM_Test_Results_HLN_BH.csv` — the same 21 comparisons with small-sample and multiplicity
+corrections applied.
+
+| Column | Description |
+|---|---|
+| `DM_HLN` | DM statistic after the Harvey–Leybourne–Newbold small-sample correction (n = 20, h = 1) |
+| `p_HLN` | Two-sided p-value from a t distribution with n − 1 degrees of freedom |
+| `p_BH` | Benjamini–Hochberg false-discovery-rate adjusted p-value across all 21 tests |
+| `BH_significant` | Yes/No at an FDR of 0.05 |
+| `Nested` | True where one model contains the other as a component, so the two forecasts are not independent |
+| `Conclusion` | Plain-language reading of the corrected result |
 
 ---
 
