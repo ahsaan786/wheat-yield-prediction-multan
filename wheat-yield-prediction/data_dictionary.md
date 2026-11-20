@@ -4,6 +4,11 @@ This document describes every data file in the repository and the meaning and
 units of each column. All data cover four districts of **Multan Division,
 Punjab, Pakistan** — Multan, Khanewal, Vehari, and Lodhran.
 
+> **Which files go with which version of the paper.** Sections 1–6 describe the files
+> from the original submission (`wheat-yield-prediction/Data/` and `models/`). The
+> results reported in the **revised manuscript** are reproduced by the scripts in
+> `revision_code/code/`; the files produced there are described in Section 7.
+
 ---
 
 ## 1. `Merged_Wheat_Multan_Final.csv` — master training dataset
@@ -16,7 +21,7 @@ Punjab, Pakistan** — Multan, Khanewal, Vehari, and Lodhran.
 | `Yield_maund_acre` | Observed wheat yield (target variable) | maunds/acre |
 | `NDVI_mean` | Mean NDVI, Mar–Apr (grain filling), MODIS MOD13Q1, cropland-masked | index (0–1) |
 | `LST_mean_C` | Mean land-surface temperature, Nov–Apr, MODIS MOD11A2, QC-filtered | °C |
-| `Rain_log` | log1p of seasonal rainfall (Nov–Apr), CHIRPS/ERA5-Land | log(mm) |
+| `Rain_log` | log1p of seasonal rainfall (Nov–Apr), ERA5-Land | log(mm) |
 | `VPD_kPa` | Vapour-pressure deficit, Mar–Apr, ERA5-Land | kPa |
 | `HeatStress_log` | log1p of heat-stress days (Tmax > 34 °C, Mar–Apr) | log(days) |
 | `ColdStress_log` | log1p of cold-stress days (Tmin < 5 °C, Nov–Feb) | log(days) |
@@ -31,7 +36,8 @@ Punjab, Pakistan** — Multan, Khanewal, Vehari, and Lodhran.
 > output before any metric is computed, so the reported **R², RMSE and MAE refer to
 > observed yield**, not to the residual. The interaction terms `NDVI×VPD` and
 > `LST×HeatStress` are derived inside the notebooks from the columns above and are
-> not stored separately.
+> not stored separately. In the revised analysis (`revision_code/`), the
+> per-district trend is a **Theil–Sen** trend fitted on the training years only.
 
 ---
 
@@ -160,3 +166,62 @@ corrections applied.
 - `xgb_wheat_model.pkl`, `lstm_wheat_model.keras`, `tcn_wheat_model.keras` — trained models.
 - `*_x_scaler.pkl`, `*_y_scaler.pkl`, `xgb_feature_cols.pkl` — feature/target scalers and column order.
 - `*_trend_models.pkl` — per-district linear trend models (for detrending / re-adding trend).
+
+---
+
+## 7. Revision files (`revision_code/code/`)
+Scripts that reproduce every number in the revised manuscript. Run order is given in
+`README.md`, `README_round2.md` and `README_round3.md` in that folder.
+Protocol: train 2002–2018, validation 2019–2020, test 2021–2025 (used once);
+per-district Theil–Sen trend; models selected on 2014–2020 rolling forecasts.
+
+### 7.1 `NDVI_FixedMask.csv` — NDVI over a fixed wheat mask
+100 rows = 4 districts × 25 years. Produced by
+`wheat-yield-prediction/Gee_scripts/03_GEE_wheat_mask_NDVI_2001-2025.txt`.
+
+| Column | Description | Unit |
+|---|---|---|
+| `Year` | Harvest year | year |
+| `District` | District name | — |
+| `NDVI_fixed` | Mean MODIS MOD13Q1 NDVI (250 m, SummaryQA ≤ 1), 1 Mar–30 Apr, over the fixed wheat mask | index (0–1) |
+| `Fixed_area_ha` | Area of the fixed wheat mask within the district (same every year) | ha |
+
+> **Fixed wheat mask.** A pixel is classed as wheat in a given year if NDVI at sowing
+> (15 Oct–31 Dec, minimum) < 0.35, peak NDVI (15 Jan–20 Mar, maximum) ≥ 0.50,
+> post-harvest NDVI (1 May–15 Jun, minimum) < 0.35, and peak − sowing ≥ 0.25.
+> The fixed mask keeps pixels classed as wheat in at least 10 of the 20 pre-test
+> years (2001–2020), so no information from the 2021–2025 test period is used.
+
+### 7.2 `NDVI_WheatMask.csv` — NDVI over a yearly wheat mask
+Same script and rule as 7.1, but the mask is rebuilt each year.
+
+| Column | Description | Unit |
+|---|---|---|
+| `Year`, `District` | As above | — |
+| `NDVI_wheat` | Mean Mar–Apr NDVI over that year's wheat mask | index (0–1) |
+| `Wheat_area_ha` | Area classed as wheat in that year | ha |
+
+### 7.3 `Tmax.csv` — mean daily maximum temperature
+
+| Column | Description | Unit |
+|---|---|---|
+| `Year`, `District` | As above | — |
+| `Tmax_mean_C` | Mean daily maximum 2 m air temperature, 1 Mar–30 Apr, ERA5-Land daily aggregates | °C |
+
+### 7.4 `roll_baselines.csv` — one-year-ahead rolling forecasts, 2014–2025
+48 rows = 4 districts × 12 years. Produced by `roll_baselines.py` (tune on years up to
+Y−3, refit on years up to Y−1, forecast year Y). All yield columns in **kg/ha**.
+
+| Column | Description |
+|---|---|
+| `District`, `Year` | District and forecast year |
+| `obs` | Observed yield |
+| `XGB` | XGBoost forecast (Theil–Sen trend) |
+| `Trend only (Theil–Sen)`, `Trend only (OLS)`, `Trend only (recent window)` | Trend-only forecasts |
+| `Ridge`, `Elastic net`, `Random forest`, `SVR (RBF)` | Other learners on the same features |
+| `AR(1) residual`, `Persistence`, `Climatology` | Simple time-series baselines |
+| `XGB (OLS trend)` | XGBoost with an OLS trend instead of Theil–Sen |
+
+### 7.5 `roll_baselines_table.csv` — RMSE summary
+One row per model; columns give RMSE (kg/ha) for `pre-test 2014-2020`,
+`test 2021-2025 (rolling)` and `all 2014-2025`.
