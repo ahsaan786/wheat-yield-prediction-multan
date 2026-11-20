@@ -1,0 +1,13 @@
+,pre-test 2014-2020,test 2021-2025 (rolling),all 2014-2025
+XGB,245.8,161.8,214.8
+Trend only (Theil–Sen),239.4,183.9,218.0
+Trend only (OLS),229.1,195.9,215.9
+Trend only (recent window),238.6,219.0,230.6
+Ridge,244.1,189.1,222.8
+Elastic net,241.8,194.4,223.3
+Random forest,261.6,163.7,226.0
+SVR (RBF),239.2,182.0,217.2
+AR(1) residual,250.9,168.1,220.2
+Persistence,247.0,200.8,228.9
+Climatology,457.0,540.4,493.5
+XGB (OLS trend),262.7,208.8,241.7

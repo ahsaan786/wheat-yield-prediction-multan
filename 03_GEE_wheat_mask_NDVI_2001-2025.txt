@@ -1,0 +1,88 @@
+// =====================================================================
+// 03 – Wheat-masked MODIS NDVI (Mar–Apr), Multan Division, 2001–2025
+// Outputs (Google Drive):
+//   NDVI_WheatMask_2001_2025.csv      – NDVI over the YEARLY wheat mask
+//   NDVI_FixedWheatMask_2001_2025.csv – NDVI over the FIXED wheat mask
+//                                       (used in the revised manuscript)
+// Paste into the Google Earth Engine Code Editor and run the Tasks.
+// =====================================================================
+
+var districts = ee.FeatureCollection('projects/ee-ahsanahsan520/assets/multan_districts')
+  .filter(ee.Filter.inList('NAME_3', ['Multan', 'Lodhran', 'Khanewal', 'Vehari']));
+
+// MODIS MOD13Q1 NDVI (250 m, 16-day), good/marginal pixels only (SummaryQA <= 1)
+var col = ee.ImageCollection('MODIS/061/MOD13Q1').map(function (img) {
+  var ok = img.select('SummaryQA').lte(1);
+  return img.select('NDVI').multiply(0.0001).updateMask(ok)
+            .copyProperties(img, ['system:time_start']);
+});
+
+// ---- Yearly wheat rule (phenology thresholds) ----
+// Wheat pixel = low NDVI at sowing (15 Oct–31 Dec), high peak (15 Jan–20 Mar),
+// low NDVI after harvest (1 May–15 Jun), and a large enough seasonal amplitude.
+var T_SOW = 0.35, T_PEAK = 0.50, T_HARV = 0.35, T_AMP = 0.25;
+
+function wheatMask(year) {
+  year = ee.Number(year);
+  var sow  = col.filterDate(ee.Date.fromYMD(year.subtract(1), 10, 15), ee.Date.fromYMD(year, 1, 1)).min();
+  var peak = col.filterDate(ee.Date.fromYMD(year, 1, 15), ee.Date.fromYMD(year, 3, 21)).max();
+  var harv = col.filterDate(ee.Date.fromYMD(year, 5, 1),  ee.Date.fromYMD(year, 6, 16)).min();
+  return sow.lt(T_SOW)
+    .and(peak.gte(T_PEAK))
+    .and(harv.lt(T_HARV))
+    .and(peak.subtract(sow).gte(T_AMP))
+    .rename('wheat');
+}
+
+// ---- Fixed wheat mask: wheat in at least 10 of the 20 pre-test years (2001–2020) ----
+// Built only from pre-test years, so no information from the 2021–2025 test period is used.
+var preYears = ee.List.sequence(2001, 2020);
+var wheatCount = ee.ImageCollection(preYears.map(function (y) {
+  return wheatMask(y).unmask(0);
+})).sum();
+var fixedMask = wheatCount.gte(10).rename('wheat');
+
+// ---- Mean Mar–Apr NDVI and wheat area per district and year ----
+function ndviTable(maskFn, ndviName, areaName) {
+  var years = ee.List.sequence(2001, 2025);
+  return ee.FeatureCollection(years.map(function (y) {
+    y = ee.Number(y);
+    var m = maskFn(y);
+    var ndvi = col.filterDate(ee.Date.fromYMD(y, 3, 1), ee.Date.fromYMD(y, 5, 1)).mean();
+    return districts.map(function (f) {
+      var g = f.geometry();
+      var n = ndvi.updateMask(m).reduceRegion({
+        reducer: ee.Reducer.mean(), geometry: g, scale: 250, maxPixels: 1e10 }).get('NDVI');
+      var a = m.selfMask().multiply(ee.Image.pixelArea()).divide(1e4).reduceRegion({
+        reducer: ee.Reducer.sum(), geometry: g, scale: 250, maxPixels: 1e10 }).get('wheat');
+      var props = {Year: y, District: f.get('NAME_3')};
+      props[ndviName] = n;
+      props[areaName] = a;
+      return ee.Feature(null, props);
+    });
+  })).flatten();
+}
+
+var yearlyTable = ndviTable(wheatMask, 'NDVI_wheat', 'Wheat_area_ha');
+var fixedTable  = ndviTable(function () { return fixedMask; }, 'NDVI_fixed', 'Fixed_area_ha');
+
+// ---- Visual check ----
+Map.centerObject(districts, 9);
+Map.addLayer(districts.style({color: 'black', fillColor: '00000000'}), {}, 'Districts');
+Map.addLayer(wheatMask(2020).selfMask().clip(districts), {palette: ['yellow']}, 'Yearly wheat mask 2020', false);
+Map.addLayer(fixedMask.selfMask().clip(districts), {palette: ['orange']}, 'Fixed wheat mask');
+
+// ---- Exports ----
+Export.table.toDrive({
+  collection: yearlyTable,
+  description: 'NDVI_WheatMask_2001_2025',
+  fileFormat: 'CSV',
+  selectors: ['Year', 'District', 'NDVI_wheat', 'Wheat_area_ha']
+});
+
+Export.table.toDrive({
+  collection: fixedTable,
+  description: 'NDVI_FixedWheatMask_2001_2025',
+  fileFormat: 'CSV',
+  selectors: ['Year', 'District', 'NDVI_fixed', 'Fixed_area_ha']
+});
